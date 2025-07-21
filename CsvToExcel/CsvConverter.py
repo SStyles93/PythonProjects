@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-CSV to Excel Converter
+Enhanced CSV to Excel Converter
 A desktop application with PyQt GUI for converting CSV files to Excel format.
+Includes feature to detect and merge CSV files with similar names.
 """
 
 import sys
 import os
+import re
 from pathlib import Path
+from collections import defaultdict
 import pandas as pd
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QWidget, QPushButton, QLabel, QFileDialog, QTextEdit, 
@@ -23,16 +26,21 @@ class ConversionWorker(QThread):
     status = pyqtSignal(str)
     finished = pyqtSignal(bool, str)
     
-    def __init__(self, csv_files, output_path, combine_sheets, sheet_names):
+    def __init__(self, csv_files, output_path, combine_sheets, sheet_names, detect_similar):
         super().__init__()
         self.csv_files = csv_files
         self.output_path = output_path
         self.combine_sheets = combine_sheets
         self.sheet_names = sheet_names
+        self.detect_similar = detect_similar
     
     def run(self):
         try:
-            if self.combine_sheets:
+            if self.detect_similar:
+                # Group similar files and process them
+                grouped_files = self.group_similar_files(self.csv_files)
+                self.process_grouped_files(grouped_files)
+            elif self.combine_sheets:
                 # Combine all CSV files into one Excel file with multiple sheets
                 self.status.emit("Creating combined Excel file...")
                 with pd.ExcelWriter(self.output_path, engine='openpyxl') as writer:
@@ -84,6 +92,133 @@ class ConversionWorker(QThread):
         except Exception as e:
             self.finished.emit(False, f"Error during conversion: {str(e)}")
     
+    def group_similar_files(self, csv_files):
+        """Group CSV files with similar names (ignoring dates and numbers)"""
+        groups = defaultdict(list)
+        
+        for file_path in csv_files:
+            file_name = Path(file_path).stem
+            # Remove common date patterns and numbers to find base name
+            base_name = self.extract_base_name(file_name)
+            groups[base_name].append(file_path)
+        
+        return groups
+    
+    def extract_base_name(self, file_name):
+        """Extract base name by removing date patterns and trailing numbers"""
+        # Remove common date patterns: YYYYMMDD, YYYY-MM-DD, YYYY_MM_DD, etc.
+        patterns = [
+            r'_\d{8}$',           # _20250401
+            r'_\d{4}-\d{2}-\d{2}$', # _2025-04-01
+            r'_\d{4}_\d{2}_\d{2}$', # _2025_04_01
+            r'_\d{6}$',           # _202504
+            r'_\d{4}$',           # _2025
+            r'-\d{8}$',           # -20250401
+            r'-\d{4}-\d{2}-\d{2}$', # -2025-04-01
+            r'-\d{4}_\d{2}_\d{2}$', # -2025_04_01
+            r'-\d{6}$',           # -202504
+            r'-\d{4}$',           # -2025
+            r'\d{8}$',            # 20250401 (at end)
+            r'\d{4}-\d{2}-\d{2}$', # 2025-04-01 (at end)
+            r'\d{4}_\d{2}_\d{2}$', # 2025_04_01 (at end)
+            r'\d{6}$',            # 202504 (at end)
+            r'_\d+$',             # Any trailing underscore + numbers
+            r'-\d+$',             # Any trailing dash + numbers
+        ]
+        
+        base_name = file_name
+        for pattern in patterns:
+            base_name = re.sub(pattern, '', base_name)
+        
+        return base_name.strip('_-')
+    
+    def process_grouped_files(self, grouped_files):
+        """Process grouped files and merge similar ones"""
+        if self.combine_sheets:
+            # Create one Excel file with sheets for each group
+            self.status.emit("Creating Excel file with merged similar files...")
+            with pd.ExcelWriter(self.output_path, engine='openpyxl') as writer:
+                sheet_index = 0
+                total_groups = len(grouped_files)
+                
+                for base_name, file_list in grouped_files.items():
+                    if len(file_list) > 1:
+                        # Merge similar files
+                        self.status.emit(f"Merging {len(file_list)} similar files for '{base_name}'...")
+                        merged_df = self.merge_csv_files(file_list)
+                        sheet_name = self.sanitize_sheet_name(base_name)
+                        merged_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    else:
+                        # Single file, process normally
+                        csv_file = file_list[0]
+                        self.status.emit(f"Processing {os.path.basename(csv_file)}...")
+                        df = pd.read_csv(csv_file)
+                        
+                        # Use custom sheet name if available
+                        if sheet_index < len(self.sheet_names) and self.sheet_names[sheet_index].strip():
+                            sheet_name = self.sheet_names[sheet_index].strip()
+                        else:
+                            sheet_name = Path(csv_file).stem
+                        
+                        sheet_name = self.sanitize_sheet_name(sheet_name)
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+                    sheet_index += 1
+                    progress_value = int(sheet_index / total_groups * 100)
+                    self.progress.emit(progress_value)
+            
+            merged_count = sum(1 for files in grouped_files.values() if len(files) > 1)
+            self.finished.emit(True, f"Successfully created Excel file with {merged_count} merged file groups: {self.output_path}")
+        
+        else:
+            # Create separate Excel files, but merge similar ones
+            output_dir = Path(self.output_path)
+            total_groups = len(grouped_files)
+            processed_groups = 0
+            
+            for base_name, file_list in grouped_files.items():
+                if len(file_list) > 1:
+                    # Merge similar files into one Excel file
+                    self.status.emit(f"Merging {len(file_list)} similar files for '{base_name}'...")
+                    merged_df = self.merge_csv_files(file_list)
+                    output_file = output_dir / f"{base_name}_merged.xlsx"
+                    merged_df.to_excel(output_file, index=False)
+                else:
+                    # Single file, convert normally
+                    csv_file = file_list[0]
+                    self.status.emit(f"Converting {os.path.basename(csv_file)}...")
+                    df = pd.read_csv(csv_file)
+                    csv_path = Path(csv_file)
+                    output_file = output_dir / f"{csv_path.stem}.xlsx"
+                    df.to_excel(output_file, index=False)
+                
+                processed_groups += 1
+                progress_value = int(processed_groups / total_groups * 100)
+                self.progress.emit(progress_value)
+            
+            merged_count = sum(1 for files in grouped_files.values() if len(files) > 1)
+            self.finished.emit(True, f"Successfully processed {total_groups} file groups with {merged_count} merged groups")
+    
+    def merge_csv_files(self, file_list):
+        """Merge multiple CSV files with similar names into one DataFrame"""
+        dataframes = []
+        
+        for csv_file in file_list:
+            df = pd.read_csv(csv_file)
+            # Add a column to identify the source file
+            df['Source_File'] = os.path.basename(csv_file)
+            dataframes.append(df)
+        
+        # Concatenate all dataframes
+        merged_df = pd.concat(dataframes, ignore_index=True, sort=False)
+        
+        # Move Source_File column to the beginning
+        cols = merged_df.columns.tolist()
+        cols = ['Source_File'] + [col for col in cols if col != 'Source_File']
+        merged_df = merged_df[cols]
+        
+        return merged_df
+    
     def sanitize_sheet_name(self, name):
         """Sanitize sheet name to comply with Excel restrictions"""
         # Excel sheet names cannot contain: \ / ? * [ ] :
@@ -109,8 +244,8 @@ class CSVToExcelConverter(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("CSV to Excel Converter")
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle("Enhanced CSV to Excel Converter")
+        self.setGeometry(100, 100, 850, 700)
         
         # Create central widget and main layout
         central_widget = QWidget()
@@ -118,7 +253,7 @@ class CSVToExcelConverter(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # Title
-        title_label = QLabel("CSV to Excel Converter")
+        title_label = QLabel("Enhanced CSV to Excel Converter")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -153,6 +288,12 @@ class CSVToExcelConverter(QMainWindow):
         # Conversion options group
         options_group = QGroupBox("Conversion Options")
         options_layout = QVBoxLayout(options_group)
+        
+        # Detect similar files option
+        self.detect_similar_checkbox = QCheckBox("Detect and merge files with similar names (e.g., Downloads_20250401 & Downloads_20250501)")
+        self.detect_similar_checkbox.setChecked(False)
+        self.detect_similar_checkbox.stateChanged.connect(self.on_detect_similar_changed)
+        options_layout.addWidget(self.detect_similar_checkbox)
         
         # Combine sheets option
         self.combine_checkbox = QCheckBox("Combine all CSV files into one Excel file with multiple sheets")
@@ -205,7 +346,7 @@ class CSVToExcelConverter(QMainWindow):
         
         # Initial state
         self.update_ui_state()
-        self.log("Application started. Select CSV files to begin.")
+        self.log("Enhanced application started. Select CSV files to begin.")
     
     def select_csv_files(self):
         """Open file dialog to select CSV files"""
@@ -222,7 +363,48 @@ class CSVToExcelConverter(QMainWindow):
             self.log(f"Selected {len(files)} CSV files:")
             for file in files:
                 self.log(f"  - {os.path.basename(file)}")
+            
+            # Show similar file detection preview if enabled
+            if self.detect_similar_checkbox.isChecked():
+                self.preview_similar_files()
+            
             self.update_ui_state()
+    
+    def preview_similar_files(self):
+        """Preview which files will be grouped together"""
+        if not self.csv_files:
+            return
+        
+        groups = defaultdict(list)
+        for file_path in self.csv_files:
+            file_name = Path(file_path).stem
+            base_name = self.extract_base_name_preview(file_name)
+            groups[base_name].append(os.path.basename(file_path))
+        
+        similar_groups = {k: v for k, v in groups.items() if len(v) > 1}
+        
+        if similar_groups:
+            self.log("Similar files detected:")
+            for base_name, files in similar_groups.items():
+                self.log(f"  Group '{base_name}': {', '.join(files)}")
+        else:
+            self.log("No similar files detected for merging.")
+    
+    def extract_base_name_preview(self, file_name):
+        """Extract base name for preview (same logic as worker)"""
+        patterns = [
+            r'_\d{8}$', r'_\d{4}-\d{2}-\d{2}$', r'_\d{4}_\d{2}_\d{2}$',
+            r'_\d{6}$', r'_\d{4}$', r'-\d{8}$', r'-\d{4}-\d{2}-\d{2}$',
+            r'-\d{4}_\d{2}_\d{2}$', r'-\d{6}$', r'-\d{4}$',
+            r'\d{8}$', r'\d{4}-\d{2}-\d{2}$', r'\d{4}_\d{2}_\d{2}$',
+            r'\d{6}$', r'_\d+$', r'-\d+$'
+        ]
+        
+        base_name = file_name
+        for pattern in patterns:
+            base_name = re.sub(pattern, '', base_name)
+        
+        return base_name.strip('_-')
     
     def select_output_location(self):
         """Select output location based on conversion mode"""
@@ -249,6 +431,12 @@ class CSVToExcelConverter(QMainWindow):
                 self.output_label.setText(f"Output directory: {os.path.basename(directory)}")
                 self.log(f"Output directory: {directory}")
         
+        self.update_ui_state()
+    
+    def on_detect_similar_changed(self):
+        """Handle detect similar files checkbox state change"""
+        if self.detect_similar_checkbox.isChecked() and self.csv_files:
+            self.preview_similar_files()
         self.update_ui_state()
     
     def on_combine_changed(self):
@@ -303,7 +491,8 @@ class CSVToExcelConverter(QMainWindow):
             self.csv_files,
             self.output_path,
             self.combine_checkbox.isChecked(),
-            sheet_names
+            sheet_names,
+            self.detect_similar_checkbox.isChecked()
         )
         
         self.worker.progress.connect(self.progress_bar.setValue)
@@ -311,7 +500,7 @@ class CSVToExcelConverter(QMainWindow):
         self.worker.finished.connect(self.on_conversion_finished)
         
         self.worker.start()
-        self.log("Starting conversion...")
+        self.log("Starting conversion with similar file detection..." if self.detect_similar_checkbox.isChecked() else "Starting conversion...")
     
     def on_conversion_finished(self, success, message):
         """Handle conversion completion"""
@@ -345,8 +534,8 @@ def main():
     app = QApplication(sys.argv)
     
     # Set application properties
-    app.setApplicationName("CSV to Excel Converter")
-    app.setApplicationVersion("1.0")
+    app.setApplicationName("Enhanced CSV to Excel Converter")
+    app.setApplicationVersion("2.0")
     
     # Create and show main window
     window = CSVToExcelConverter()
@@ -358,4 +547,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
