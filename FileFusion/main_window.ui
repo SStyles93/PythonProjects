@@ -24,32 +24,6 @@
      </rect>
     </property>
    </widget>
-   <widget class="QCheckBox" name="mergeCheckbox">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>300</y>
-      <width>251</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Merge into a single PDF file</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="startButton">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>450</y>
-      <width>161</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Start Conversion</string>
-    </property>
-   </widget>
    <widget class="Line" name="line">
     <property name="geometry">
      <rect>
@@ -66,9 +40,9 @@
    <widget class="QProgressBar" name="progressBar">
     <property name="geometry">
      <rect>
-      <x>10</x>
+      <x>20</x>
       <y>500</y>
-      <width>781</width>
+      <width>761</width>
       <height>23</height>
      </rect>
     </property>
@@ -81,7 +55,7 @@
      <rect>
       <x>20</x>
       <y>530</y>
-      <width>731</width>
+      <width>761</width>
       <height>21</height>
      </rect>
     </property>
@@ -92,22 +66,26 @@
    <widget class="QWidget" name="horizontalLayoutWidget">
     <property name="geometry">
      <rect>
-      <x>10</x>
-      <y>380</y>
-      <width>421</width>
+      <x>20</x>
+      <y>400</y>
+      <width>761</width>
       <height>51</height>
      </rect>
     </property>
-    <layout class="QHBoxLayout" name="horizontalLayout">
+    <layout class="QHBoxLayout" name="outputField">
      <item>
-      <widget class="QLabel" name="label">
+      <widget class="QLabel" name="outputFolderLabel">
        <property name="text">
-        <string>Output Filename:</string>
+        <string>OuputFolder :</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QLineEdit" name="outputFilenameEdit"/>
+      <widget class="QLineEdit" name="outputFolderEdit">
+       <property name="readOnly">
+        <bool>true</bool>
+       </property>
+      </widget>
      </item>
      <item>
       <widget class="QPushButton" name="browseButton">
@@ -177,15 +155,41 @@
      </item>
     </layout>
    </widget>
+   <widget class="QPushButton" name="startButton">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>462</y>
+      <width>761</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Start Conversion</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="mergeCheckbox">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>290</y>
+      <width>181</width>
+      <height>41</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Merge into a single PDF file</string>
+    </property>
+   </widget>
    <zorder>fileListWidget</zorder>
-   <zorder>mergeCheckbox</zorder>
-   <zorder>startButton</zorder>
    <zorder>line</zorder>
    <zorder>statusLabel</zorder>
    <zorder>progressBar</zorder>
    <zorder>horizontalLayoutWidget</zorder>
    <zorder>horizontalLayoutWidget_2</zorder>
    <zorder>horizontalLayoutWidget_3</zorder>
+   <zorder>startButton</zorder>
+   <zorder>mergeCheckbox</zorder>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">

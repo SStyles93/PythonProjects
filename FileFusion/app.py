@@ -1,34 +1,33 @@
-# app.py (PyQt5) - Professional UI/UX Version
-
 import sys
 import os
 import logging
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidgetItem
+import tempfile
+import shutil
+from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidgetItem, QDialog, QWidget
 from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
 
-# Import our generated UI and converter engine
-from main_window_ui import Ui_MainWindow
+# Import your custom and generated UI files
 from converter_engine import ConverterEngine
+from main_window_ui import Ui_MainWindow
+from preview_window import PreviewWindow
 
-# --- Worker for Background Processing (No changes needed here) ---
+
+# --- Worker for Background Processing (No changes needed) ---
 class Worker(QObject):
-    """
-    A worker object that runs tasks in a separate thread.
-    """
-    finished = pyqtSignal()
+    finished = pyqtSignal(bool, str, str)
     progress = pyqtSignal(int)
     status_update = pyqtSignal(str)
-    error = pyqtSignal(str)
 
-    def __init__(self, files, merge, output_filename):
+    def __init__(self, files, merge, output_path):
         super().__init__()
         self.files = files
         self.merge = merge
-        self.output_filename = output_filename
+        self.output_path = output_path
 
     @pyqtSlot()
     def run(self):
-        """The main task execution method."""
+        log_handler = None
+        temp_file_handle = None
         try:
             engine = ConverterEngine(self.files)
             
@@ -36,38 +35,48 @@ class Worker(QObject):
                 def __init__(self, status_signal):
                     super().__init__()
                     self.status_signal = status_signal
-                
                 def emit(self, record):
-                    msg = self.format(record)
-                    self.status_signal.emit(msg)
+                    self.status_signal.emit(self.format(record))
 
-            logger = logging.getLogger() 
             log_handler = QtLogHandler(self.status_update)
+            logger = logging.getLogger() 
             logger.addHandler(log_handler)
             
             self.status_update.emit("Starting conversion process...")
-            converted_files = engine.convert_to_pdf()
-            self.progress.emit(50)
+
+            # Report the progress of the engine
+            def report_progress(percentage):
+                self.progress.emit(percentage)
+            
+            # Pass the output folder for individual conversions
+            output_folder = None if self.merge else self.output_path
+            converted_files = engine.convert_to_pdf(
+                output_folder=output_folder,
+                progress_callback=report_progress # Pass our function here
+            )
 
             if not converted_files:
                 raise ValueError("No files were successfully converted.")
-
+            
             if self.merge:
                 self.status_update.emit("Starting merge process...")
-                success = engine.merge_pdfs(self.output_filename)
-                if not success:
-                    raise RuntimeError("Failed to merge the PDF files.")
+                temp_file_handle = open(self.output_path, 'wb')
+                engine.merge_pdfs(temp_file_handle)
+                temp_file_handle.close()
+                temp_file_handle = None
             
             self.progress.emit(100)
-            self.status_update.emit("Process completed successfully!")
+            self.finished.emit(True, self.output_path, "")
 
         except Exception as e:
             error_message = f"An error occurred: {e}"
             logging.error(error_message)
-            self.error.emit(error_message)
+            self.finished.emit(False, "", error_message)
         finally:
-            logger.removeHandler(log_handler)
-            self.finished.emit()
+            if temp_file_handle:
+                temp_file_handle.close()
+            if log_handler:
+                logger.removeHandler(log_handler)
 
 
 # --- Main Application Window ---
@@ -76,16 +85,13 @@ class AppWindow(QMainWindow):
         super().__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.setWindowTitle("FileFusion Pro")
-        
-        # --- NEW: Enable Drag and Drop ---
+        self.setWindowTitle("FileFusion")
         self.setAcceptDrops(True)
-
-        # --- NEW: Apply a professional dark theme ---
         self.apply_stylesheet()
 
         self.thread = None
         self.worker = None
+        self.temp_pdf_file = None
 
         # --- Connect signals to slots ---
         self.ui.addButton.clicked.connect(self.add_files)
@@ -93,15 +99,40 @@ class AppWindow(QMainWindow):
         self.ui.clearButton.clicked.connect(self.clear_all_files)
         self.ui.upButton.clicked.connect(self.move_file_up)
         self.ui.downButton.clicked.connect(self.move_file_down)
-        self.ui.browseButton.clicked.connect(self.browse_output_file)
+        self.ui.browseButton.clicked.connect(self.browse_output_folder)
         self.ui.startButton.clicked.connect(self.start_processing)
-        self.ui.mergeCheckbox.stateChanged.connect(self.toggle_merge_options)
+        self.ui.mergeCheckbox.stateChanged.connect(self.update_ui_state)
+
+        # --- Connect file list changes to the UI update method ---
+        self.ui.fileListWidget.model().rowsInserted.connect(self.update_ui_state)
+        self.ui.fileListWidget.model().rowsRemoved.connect(self.update_ui_state)
 
         # --- Initial UI state ---
-        self.toggle_merge_options()
+        self.update_ui_state()
         self.ui.progressBar.setValue(0)
 
-    # --- NEW: Method to apply the dark theme stylesheet ---
+    def update_ui_state(self):
+        """
+        Updates the visibility of widgets based on the number of files and merge state.
+        """
+        num_files = self.ui.fileListWidget.count()
+        
+        # Rule 1: 'mergeCheckbox' is only visible if there are 2 or more files.
+        self.ui.mergeCheckbox.setVisible(num_files > 1)
+
+        # If there's only one file, ensure the merge box is unchecked.
+        if num_files <= 1 and self.ui.mergeCheckbox.isChecked():
+            self.ui.mergeCheckbox.setChecked(False)
+            # The setChecked(False) will re-trigger this method, so we can return early.
+            return
+
+        merge_is_checked = self.ui.mergeCheckbox.isChecked()
+
+        # Rule 2: The output folder widgets are visible only if 'merge' is NOT checked.
+        # We use the container widget from your UI file: 'horizontalLayoutWidget'
+        show_output_folder_widgets = not merge_is_checked
+        self.ui.horizontalLayoutWidget.setVisible(show_output_folder_widgets)
+
     def apply_stylesheet(self):
         """Applies a dark theme stylesheet to the application."""
         self.setStyleSheet("""
@@ -154,6 +185,12 @@ class AppWindow(QMainWindow):
                 background-color: #3c3c3c;
                 border-radius: 4px;
             }
+                           
+            QCheckBox {
+                /* Use less horizontal padding to prevent the label from being cut off */
+                padding: 0px;
+            }
+
             QProgressBar {
                 border: 1px solid #1e1e1e;
                 border-radius: 4px;
@@ -170,46 +207,27 @@ class AppWindow(QMainWindow):
             }
         """)
 
-    # --- NEW: Drag and Drop Event Handlers ---
     def dragEnterEvent(self, event):
-        """Handles files being dragged over the window."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
+        if event.mimeData().hasUrls(): event.acceptProposedAction()
+        else: event.ignore()
 
     def dropEvent(self, event):
-        """Handles files being dropped onto the window."""
         urls = event.mimeData().urls()
         files_to_add = []
-        valid_extensions = ['.doc', '.docx', '.pdf']
-        
+        valid_extensions = ['.doc', '.docx', '.pdf', '.png', '.jpg', '.jpeg', '.bmp']
         for url in urls:
             file_path = url.toLocalFile()
-            if os.path.isfile(file_path):
-                if any(file_path.lower().endswith(ext) for ext in valid_extensions):
-                    files_to_add.append(file_path)
-        
-        if files_to_add:
-            self.add_files_to_list(files_to_add)
+            if os.path.isfile(file_path) and any(file_path.lower().endswith(ext) for ext in valid_extensions):
+                files_to_add.append(file_path)
+        if files_to_add: self.add_files_to_list(files_to_add)
 
-    # --- MODIFIED: `add_files` now uses the helper method ---
     def add_files(self):
-        """Opens a file dialog to add files to the list."""
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Files to Convert",
-            "",
-            "Documents (*.doc *.docx *.pdf)"
-        )
-        if files:
-            self.add_files_to_list(files)
+        file_filter = "All Supported Files (*.doc *.docx *.pdf *.png *.jpg *.jpeg);;Documents (*.doc *.docx *.pdf);;Images (*.png *.jpg *.jpeg *.bmp)"
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Files to Convert", "", file_filter)
+        if files: self.add_files_to_list(files)
 
-    # --- NEW: Helper method to add files and prevent duplicates ---
     def add_files_to_list(self, files: list):
-        """Adds a list of file paths to the list widget, avoiding duplicates."""
         current_files = {self.ui.fileListWidget.item(i).text() for i in range(self.ui.fileListWidget.count())}
-        
         for file in files:
             if file not in current_files:
                 self.ui.fileListWidget.addItem(QListWidgetItem(file))
@@ -218,8 +236,7 @@ class AppWindow(QMainWindow):
     def remove_selected_file(self):
         selected_items = self.ui.fileListWidget.selectedItems()
         if not selected_items: return
-        for item in selected_items:
-            self.ui.fileListWidget.takeItem(self.ui.fileListWidget.row(item))
+        for item in selected_items: self.ui.fileListWidget.takeItem(self.ui.fileListWidget.row(item))
 
     def clear_all_files(self):
         self.ui.fileListWidget.clear()
@@ -238,20 +255,15 @@ class AppWindow(QMainWindow):
             self.ui.fileListWidget.insertItem(current_row + 1, item)
             self.ui.fileListWidget.setCurrentRow(current_row + 1)
 
-    def toggle_merge_options(self):
-        is_merge_enabled = self.ui.mergeCheckbox.isChecked()
-        self.ui.outputFilenameEdit.setEnabled(is_merge_enabled)
-        self.ui.browseButton.setEnabled(is_merge_enabled)
+    def browse_output_folder(self):
+        """Opens a dialog to select an output folder."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Folder", "")
+        if folder:
+            self.ui.outputFolderEdit.setText(folder)
 
-    def browse_output_file(self):
-        output_file, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Merged PDF As...",
-            "",
-            "PDF Files (*.pdf)"
-        )
-        if output_file:
-            self.ui.outputFilenameEdit.setText(output_file)
+    def closeEvent(self, event):
+        self.cleanup_temp_file()
+        super().closeEvent(event)
 
     def start_processing(self):
         files = [self.ui.fileListWidget.item(i).text() for i in range(self.ui.fileListWidget.count())]
@@ -259,32 +271,75 @@ class AppWindow(QMainWindow):
             self.ui.statusLabel.setText("Error: No files selected.")
             return
 
-        merge = self.ui.mergeCheckbox.isChecked()
-        output_filename = self.ui.outputFilenameEdit.text()
+        merge = self.ui.mergeCheckbox.isChecked() and self.ui.fileListWidget.count() > 1
+        output_path = ""
 
-        if merge and not output_filename:
-            self.ui.statusLabel.setText("Error: Please specify an output filename for merging.")
-            return
+        if merge:
+            temp_file_handle = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            self.temp_pdf_file = temp_file_handle.name
+            temp_file_handle.close()
+            output_path = self.temp_pdf_file
+        else:
+            output_path = self.ui.outputFolderEdit.text()
+            if not output_path or not os.path.isdir(output_path):
+                self.ui.statusLabel.setText("Error: Please select a valid output folder.")
+                return
 
         self.ui.startButton.setEnabled(False)
         self.ui.progressBar.setValue(0)
         self.ui.statusLabel.setText("Preparing to process...")
 
         self.thread = QThread()
-        self.worker = Worker(files, merge, output_filename)
+        self.worker = Worker(files, merge, output_path)
         self.worker.moveToThread(self.thread)
 
+        self.worker.finished.connect(self.on_processing_finished)
         self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.ui.progressBar.setValue)
+        self.worker.status_update.connect(self.ui.statusLabel.setText)
+        
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
-        self.worker.progress.connect(self.ui.progressBar.setValue)
-        self.worker.status_update.connect(self.ui.statusLabel.setText)
-        self.worker.error.connect(self.ui.statusLabel.setText)
         
-        self.thread.finished.connect(lambda: self.ui.startButton.setEnabled(True))
-
         self.thread.start()
+
+    def on_processing_finished(self, success, result_path, error_msg):
+        self.ui.startButton.setEnabled(True)
+        if not success:
+            self.ui.statusLabel.setText(f"Error: {error_msg}")
+            self.cleanup_temp_file()
+            return
+            
+        # Check if we were in merge mode
+        if self.ui.mergeCheckbox.isChecked() and self.ui.fileListWidget.count() > 1:
+            self.ui.statusLabel.setText("Merge complete. Opening preview...")
+            try:
+                preview = PreviewWindow(result_path, self)
+                preview.closing.connect(self.cleanup_temp_file)
+                if preview.exec_() == QDialog.Accepted:
+                    final_path, _ = QFileDialog.getSaveFileName(self, "Save Merged PDF", "", "PDF Files (*.pdf)")
+                    if final_path:
+                        shutil.copy(self.temp_pdf_file, final_path)
+                        self.ui.statusLabel.setText(f"File saved successfully to {final_path}")
+                else:
+                    self.ui.statusLabel.setText("Save cancelled by user.")
+            except Exception as e:
+                self.ui.statusLabel.setText(f"Error opening preview: {e}")
+            finally:
+                self.cleanup_temp_file()
+        else:
+            # This was an individual conversion
+            self.ui.statusLabel.setText(f"Individual conversions complete! Files saved in {self.ui.outputFolderEdit.text()}")
+
+    def cleanup_temp_file(self):
+        if self.temp_pdf_file and os.path.exists(self.temp_pdf_file):
+            try:
+                os.remove(self.temp_pdf_file)
+                logging.info(f"Successfully cleaned up temporary file: {self.temp_pdf_file}")
+                self.temp_pdf_file = None
+            except Exception as e:
+                logging.error(f"Failed to delete temporary file on cleanup: {e}")
 
 # --- Application Entry Point ---
 if __name__ == "__main__":
