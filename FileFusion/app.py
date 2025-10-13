@@ -3,6 +3,7 @@ import os
 import logging
 import tempfile
 import shutil
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QListWidgetItem, QDialog, QWidget
 from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
 
@@ -29,6 +30,8 @@ class Worker(QObject):
         log_handler = None
         temp_file_handle = None
         try:
+            # Initialize the COM library for this thread.
+
             engine = ConverterEngine(self.files)
             
             class QtLogHandler(logging.Handler):
@@ -77,7 +80,6 @@ class Worker(QObject):
                 temp_file_handle.close()
             if log_handler:
                 logger.removeHandler(log_handler)
-
 
 # --- Main Application Window ---
 class AppWindow(QMainWindow):
@@ -343,6 +345,15 @@ class AppWindow(QMainWindow):
 
 # --- Application Entry Point ---
 if __name__ == "__main__":
+
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # In windowed mode (--noconsole), stdout and stderr are None.
+        # We redirect them to a null device to prevent this.
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, 'w')
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, 'w')
+
     app = QApplication(sys.argv)
     window = AppWindow()
     window.show()
