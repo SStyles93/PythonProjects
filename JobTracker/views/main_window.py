@@ -3,13 +3,13 @@ from PyQt5.QtCore import QDate
 from PyQt5.QtGui import QIcon
 from views.application_dialog import ApplicationDialog
 from enums.application_status import ApplicationStatus
-from ui_mainwindow import Ui_MainWindow
+from ui.ui_mainwindow import Ui_MainWindow
 
 class MainWindow(QMainWindow):
     def __init__(self, controller):
         super().__init__()
         self.controller = controller
-        self.setWindowIcon(QIcon("icon_JobAT.ico"))
+        self.setWindowIcon(QIcon("icons/jobat.ico"))
 
         # Load the UI
         self.ui = Ui_MainWindow()

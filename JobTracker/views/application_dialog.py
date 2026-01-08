@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QDialog
-from ui_application_dialog import Ui_ApplicationDialog
+from ui.ui_application_dialog import Ui_ApplicationDialog
 from enums.application_status import ApplicationStatus
 from PyQt5.QtCore import QDate
 
