@@ -24,9 +24,11 @@ class ApplicationDialog(QDialog, Ui_ApplicationDialog):
         # Fill data if editing
         if self.application:
             self.company_input.setText(self.application.company)
+            self.jobName_input.setText(self.application.job_name)
             self.date_input.setDate(self.application.date)
             self.link_input.setText(self.application.link)
             self.status_input.setCurrentText(self.application.status.value)
+            self.comment_input.setPlainText(self.application.comment)
 
         # Connect buttons
         self.buttonBox.accepted.connect(self.accept)
@@ -35,7 +37,9 @@ class ApplicationDialog(QDialog, Ui_ApplicationDialog):
     def get_data(self):
         return {
             "company": self.company_input.text().strip(),
+            "job_name": self.jobName_input.text().strip(),
             "date": self.date_input.date().toPyDate(),
             "link": self.link_input.text().strip(),
-            "status": ApplicationStatus(self.status_input.currentText())
-        }
+            "status": ApplicationStatus(self.status_input.currentText()),
+            "comment": self.comment_input.toPlainText().strip()
+}
