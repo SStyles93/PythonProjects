@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ApplicationDialog</class>
+ <widget class="QDialog" name="ApplicationDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>450</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Application</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout">
+     <property name="labelAlignment">
+      <set>Qt::AlignRight</set>
+     </property>
+     <property name="formAlignment">
+      <set>Qt::AlignTop</set>
+     </property>
+     <property name="verticalSpacing">
+      <number>12</number>
+     </property>
+     
+     <!-- Company -->
+     <item row="0" column="0">
+      <widget class="QLabel" name="labelCompany">
+       <property name="text">
+        <string>Company:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="company_input">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Date -->
+     <item row="1" column="0">
+      <widget class="QLabel" name="labelDate">
+       <property name="text">
+        <string>Date:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QDateEdit" name="date_input">
+       <property name="calendarPopup">
+        <bool>true</bool>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+       <property name="displayFormat">
+        <string>yyyy-MM-dd</string>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Link -->
+     <item row="2" column="0">
+      <widget class="QLabel" name="labelLink">
+       <property name="text">
+        <string>Link:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLineEdit" name="link_input">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Status -->
+     <item row="3" column="0">
+      <widget class="QLabel" name="labelStatus">
+       <property name="text">
+        <string>Status:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QComboBox" name="status_input">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+
+    </layout>
+   </item>
+
+   <!-- Dialog Buttons -->
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Ok|QDialogButtonBox::Cancel</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
