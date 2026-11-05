@@ -48,13 +48,25 @@ QPushButton:pressed {
     color: #ffffff;
 }
 
-QTableWidget {
+QTableWidget, QTreeWidget {
     background-color: #3c3f41;
     alternate-background-color: #313335;
     color: #ffffff;
     gridline-color: #555555;
     selection-background-color: #007acc;
     selection-color: #ffffff;
+}
+
+/* Row and column lines for the month tree */
+QTreeWidget::item {
+    border-bottom: 1px solid #555555;
+    border-right: 1px solid #555555;
+    padding: 3px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #007acc;
+    color: #ffffff;
 }
 
 QHeaderView::section {
