@@ -1,9 +1,12 @@
-from PyQt5.QtWidgets import QMainWindow, QTableWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QTreeWidgetItem
 from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QFont
 from views.application_dialog import ApplicationDialog
 from enums.application_status import ApplicationStatus
 from ui.ui_mainwindow import Ui_MainWindow
+
+
+DATE_COLUMN = 2
 
 
 class MainWindow(QMainWindow):
@@ -11,6 +14,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.controller = controller
         self.setWindowIcon(QIcon("icons/jobat.ico"))
+
+        # Months the user has collapsed (kept across refreshes)
+        self.collapsed_months = set()
 
         # Load the UI
         self.ui = Ui_MainWindow()
@@ -22,19 +28,22 @@ class MainWindow(QMainWindow):
         self.ui.pushButtonDelete.clicked.connect(self.on_delete)
         self.ui.pushButtonSearch.clicked.connect(self.on_search)
 
-        # Table setup
-        table = self.ui.tableWidgetApps
-        table.setColumnCount(6)
-        table.setHorizontalHeaderLabels([
+        # Tree setup (one collapsible group per month)
+        tree = self.ui.treeWidgetApps
+        tree.setColumnCount(6)
+        tree.setHeaderLabels([
             "Company", "Job Name", "Date", "Status", "Link", "Comment"
         ])
-        table.setSelectionBehavior(table.SelectRows)
-        table.setEditTriggers(table.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(True)
+        tree.setSelectionBehavior(tree.SelectRows)
+        tree.setEditTriggers(tree.NoEditTriggers)
+        tree.header().setStretchLastSection(True)
+        tree.itemExpanded.connect(self.on_month_expanded)
+        tree.itemCollapsed.connect(self.on_month_collapsed)
+        tree.itemDoubleClicked.connect(self.on_item_double_clicked)
 
         # Enable sorting
-        header = table.horizontalHeader()
-        table.setSortingEnabled(True)
+        header = tree.header()
+        tree.setSortingEnabled(True)
         header.setSortIndicatorShown(True)
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self.on_header_clicked)  # intercept Comment clicks
@@ -50,12 +59,11 @@ class MainWindow(QMainWindow):
         self.ui.dateEditFrom.setDisplayFormat("dd/MM/yyyy")
         self.ui.dateEditTo.setDisplayFormat("dd/MM/yyyy")
 
+        # Default sort by Date descending
+        tree.sortItems(DATE_COLUMN, Qt.DescendingOrder)
+
         # Initial refresh
         self.refresh_table(self.controller.database.applications)
-
-        # Default sort by Date descending
-        table.sortItems(2, Qt.DescendingOrder)
-        header.setSortIndicator(2, Qt.DescendingOrder)
 
     # ----------------------------
     # Ignore Comment column clicks
@@ -66,58 +74,57 @@ class MainWindow(QMainWindow):
         # For all other columns, Qt handles sorting and arrow automatically
 
     # ----------------------------
-    # Helper: create QTableWidgetItem
+    # Remember collapsed months
     # ----------------------------
-    def _make_item(self, text, sort_data=None):
-        item = QTableWidgetItem(str(text))
-        # If no sort_data provided, use displayed text (Qt sorts by text by default)
-        if sort_data is None:
-            sort_data = str(text)
-        item.setData(Qt.UserRole, sort_data)
-        return item
+    def on_month_expanded(self, item):
+        if isinstance(item, MonthItem):
+            self.collapsed_months.discard(item.month)
+
+    def on_month_collapsed(self, item):
+        if isinstance(item, MonthItem):
+            self.collapsed_months.add(item.month)
+
+    def on_item_double_clicked(self, item, column):
+        if isinstance(item, ApplicationItem):
+            self.on_edit()
 
     # ----------------------------
-    # Refresh table (view-only sort)
+    # Refresh tree (grouped by month, view-only sort)
     # ----------------------------
     def refresh_table(self, applications):
-        table = self.ui.tableWidgetApps
+        tree = self.ui.treeWidgetApps
 
         # Disable sorting while filling to avoid flicker
-        sorting_enabled = table.isSortingEnabled()
-        table.setSortingEnabled(False)
+        sorting_enabled = tree.isSortingEnabled()
+        tree.setSortingEnabled(False)
+        tree.clear()
 
-        table.setRowCount(0)
+        months = {}
         for app in applications:
-            row = table.rowCount()
-            table.insertRow(row)
+            month = app.date.replace(day=1)
+            months.setdefault(month, []).append(app)
 
-            table.setItem(row, 0, self._make_item(app.company))
-            table.setItem(row, 1, self._make_item(app.job_name))
-            table.setItem(row, 2, DateItem(app.date))   # <-- use custom DateItem
-            table.setItem(row, 3, self._make_item(app.status.value))
-            table.setItem(row, 4, self._make_item(app.link))
-            table.setItem(row, 5, self._make_item(app.comment))
+        for month, apps in months.items():
+            month_item = MonthItem(month, len(apps))
+            tree.addTopLevelItem(month_item)
+            month_item.setFirstColumnSpanned(True)
+            for app in apps:
+                month_item.addChild(ApplicationItem(app))
+            month_item.setExpanded(month not in self.collapsed_months)
 
-        # Restore sorting
-        table.setSortingEnabled(sorting_enabled)
-
-        # Set arrow after refresh
-        table.horizontalHeader().setSortIndicator(2, Qt.DescendingOrder)
-
+        # Restore sorting (re-sorts by the current header column/order)
+        tree.setSortingEnabled(sorting_enabled)
 
     # ----------------------------
     # Selected application
     # ----------------------------
     def get_selected_application(self):
-        row = self.ui.tableWidgetApps.currentRow()
-        if row < 0:
+        item = self.ui.treeWidgetApps.currentItem()
+        if not isinstance(item, ApplicationItem):
             return None
 
-        company = self.ui.tableWidgetApps.item(row, 0).text()
-        date_str = self.ui.tableWidgetApps.item(row, 2).text()
-
         for app in self.controller.database.applications:
-            if app.company == company and app.date.strftime("%d/%m/%Y") == date_str:
+            if app.id == item.app_id:
                 return app
         return None
 
@@ -165,13 +172,43 @@ class MainWindow(QMainWindow):
         self.refresh_table(self.controller.database.applications)
 
 
-# Custom Table Item to sort by date
-class DateItem(QTableWidgetItem):
-    def __init__(self, date):
-        super().__init__(date.strftime("%d/%m/%Y"))
-        self.date = date
+# Collapsible month header row
+class MonthItem(QTreeWidgetItem):
+    def __init__(self, month, count):
+        super().__init__([f"{month.strftime('%B %Y')} ({count})"])
+        self.month = month
+        font = QFont()
+        font.setBold(True)
+        self.setFont(0, font)
+        self.setFlags(Qt.ItemIsEnabled)  # not selectable
 
     def __lt__(self, other):
-        if isinstance(other, DateItem):
+        if not isinstance(other, MonthItem):
+            return super().__lt__(other)
+        tree = self.treeWidget()
+        if tree.sortColumn() == DATE_COLUMN:
+            return self.month < other.month
+        # Sorting by another column: keep months newest first
+        if tree.header().sortIndicatorOrder() == Qt.AscendingOrder:
+            return self.month > other.month
+        return self.month < other.month
+
+
+# Application row, sorts by real date in the Date column
+class ApplicationItem(QTreeWidgetItem):
+    def __init__(self, app):
+        super().__init__([
+            app.company,
+            app.job_name,
+            app.date.strftime("%d/%m/%Y"),
+            app.status.value,
+            app.link,
+            app.comment,
+        ])
+        self.app_id = app.id
+        self.date = app.date
+
+    def __lt__(self, other):
+        if isinstance(other, ApplicationItem) and self.treeWidget().sortColumn() == DATE_COLUMN:
             return self.date < other.date
         return super().__lt__(other)
